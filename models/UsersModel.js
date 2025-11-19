@@ -4,7 +4,7 @@ let Schema = mongoose.Schema;
 let UsersSchema = new Schema({
   surveyId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "basicSurvey", // BasicSurveyResponseModel 이름
+    ref: "basicSurvey",
     default: null,
   },
   email: {

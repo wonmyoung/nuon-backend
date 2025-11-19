@@ -1,8 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const UsersModel = require("../models/UsersModel");
-const BasicSurveyResponseModel = require("../models/BasicSurveyResponseModel");
-const AdvancedSurveyResponseModel = require("../models/AdvancedSurveyResponseModel");
 const jwt = require("jsonwebtoken");
 const { JWT_SecretKey } = require("../config/env");
 const verifyToken = require("../libs/verifyToken");
@@ -196,26 +194,6 @@ router.get("/profile", verifyToken, async (req, res) => {
       .lean()
       .exec();
 
-    const survey = await BasicSurveyResponseModel.findOne({
-      company: req.userId,
-    })
-      .sort({ createdAt: -1 }) // 최신 설문
-      .lean()
-      .exec();
-
-    const advancedSurveys = await AdvancedSurveyResponseModel.find({
-      author: req.userId,
-    })
-      .lean()
-      .exec();
-
-    const advancedSurveyIds = {};
-    advancedSurveys.forEach((survey) => {
-      if (survey.code) {
-        advancedSurveyIds[survey.code] = survey._id;
-      }
-    });
-
     const formattedData = {
       _id: data._id,
       companyId: data._id,
@@ -228,8 +206,7 @@ router.get("/profile", verifyToken, async (req, res) => {
       userType: data.userType,
       department: data.department,
       isAdmin: data.isAdmin,
-      surveyId: survey?._id || null,
-      advancedSurveyIds,
+      surveyId: null,
       userSurveyStatus: data.userSurveyStatus || "PENDING",
     };
     res.status(200).json({
@@ -402,6 +379,5 @@ router.post("/withdraw", verifyToken, async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;
