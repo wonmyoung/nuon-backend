@@ -6,6 +6,11 @@ module.exports = {
   domain: "http://http://testsite.test.s3-website.ap-northeast-2.amazonaws.com",
   // domain : "localhost:8080"
 
+  // CAFE24
+  CAFE24_MALL_ID: "nuon",
+  CAFE24_REDIRECT_URI: "https://172.30.1.80:8080/callback",
+  CAFE24_CLIENT_ID: "snzrnguPMpUuveE09hTlKB",
+  CAFE24_CLIENT_SECRET: "rgAoQXIXPVIigCdhc9fCXA",
   // 네이버_뉴온
   NAVER_CLIENT_ID_NUON: "25jL3oAAKUiwZY71p1U9wj",
   NAVER_CLIENT_SECRET_NUON: "$2a$04$MvWR7EJEJrdtKosaaTrblu",
