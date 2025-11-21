@@ -365,29 +365,62 @@ router.get("/cafe24/orders", async (req, res) => {
   }
 });
 
-/**
- * 롯데온 - 상품별 주문내역
- */
+async function retryRequest(fn, retries = 3, delay = 2000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+
+      console.log(`🔁 Retry ${i + 1}/${retries}...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 router.get("/lotteon/orders", async (req, res) => {
   const { startDate, endDate } = req.query;
 
   try {
-    let response = await axios.get(
-      "https://openapi.lotteon.com/v1/openapi/settle/v1/se/SettleProduct",
-      {
-        headers: {
-          Authorization: `Bearer ${LOTTEON_API_KEY}`,
-          Accept: "application/json",
-          "Accept-Language": "ko",
-          "X-Timezone": "GMT+09:00",
-          "Content-Type": "application/json",
-        },
-        params: {
-          startDate,
-          endDate,
-        },
+    const requestFn = async () => {
+      return await axios.get(
+        "https://openapi.lotteon.com/v1/openapi/settle/v1/se/SettleProduct",
+        {
+          headers: {
+            Authorization: `Bearer ${LOTTEON_API_KEY}`,
+            Accept: "application/json",
+            "Accept-Language": "ko",
+            "X-Timezone": "GMT+09:00",
+            "Content-Type": "application/json",
+          },
+          params: {
+            startDate,
+            endDate,
+          },
+        }
+      );
+    };
+
+    let response;
+
+    try {
+      response = await retryRequest(requestFn);
+    } catch (err) {
+      // 롯데온의 9000 오류 처리 (정산 데이터 없음/DB 오류)
+      if (err.response?.data?.returnCode === "9000") {
+        console.log("⚠ 롯데온 서버 9000 오류 발생 → 정산 데이터 없음으로 처리");
+        return res.status(200).json({
+          status: 200,
+          success: true,
+          data: {
+            totalCount: 0,
+            list: [],
+          },
+        });
       }
-    );
+
+      throw err;
+    }
 
     return res.status(200).json({
       status: 200,
@@ -395,8 +428,9 @@ router.get("/lotteon/orders", async (req, res) => {
       data: response.data,
     });
   } catch (err) {
-    console.error("error:", err.message);
+    console.error("최종 에러:", err.message);
     console.error("Error details:", err.response?.data);
+
     return res.status(400).json({
       status: 400,
       success: false,
@@ -405,4 +439,5 @@ router.get("/lotteon/orders", async (req, res) => {
     });
   }
 });
+
 module.exports = router;
