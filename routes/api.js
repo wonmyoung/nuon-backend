@@ -11,6 +11,7 @@ const {
   CAFE24_REDIRECT_URI,
   CAFE24_CLIENT_ID,
   CAFE24_CLIENT_SECRET,
+  LOTTEON_API_KEY,
 } = require("../config/env");
 
 /**
@@ -343,6 +344,47 @@ router.get("/cafe24/orders", async (req, res) => {
           end_date,
           limit,
           offset,
+        },
+      }
+    );
+
+    return res.status(200).json({
+      status: 200,
+      success: true,
+      data: response.data,
+    });
+  } catch (err) {
+    console.error("error:", err.message);
+    console.error("Error details:", err.response?.data);
+    return res.status(400).json({
+      status: 400,
+      success: false,
+      error: err.message,
+      details: err.response?.data || null,
+    });
+  }
+});
+
+/**
+ * 롯데온 - 상품별 주문내역
+ */
+router.get("/lotteon/orders", async (req, res) => {
+  const { startDate, endDate } = req.query;
+
+  try {
+    let response = await axios.get(
+      "https://openapi.lotteon.com/v1/openapi/settle/v1/se/SettleProduct",
+      {
+        headers: {
+          Authorization: `Bearer ${LOTTEON_API_KEY}`,
+          Accept: "application/json",
+          "Accept-Language": "ko",
+          "X-Timezone": "GMT+09:00",
+          "Content-Type": "application/json",
+        },
+        params: {
+          startDate,
+          endDate,
         },
       }
     );

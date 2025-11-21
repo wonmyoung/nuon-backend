@@ -6,6 +6,8 @@ module.exports = {
   domain: "http://http://testsite.test.s3-website.ap-northeast-2.amazonaws.com",
   // domain : "localhost:8080"
 
+  // 롯데온
+  LOTTEON_API_KEY: "5d5b2cb498f3d20001665f4e9c861a0ad041498f8e00c76fab4cfb17",
   // CAFE24
   CAFE24_MALL_ID: "nuon",
   CAFE24_REDIRECT_URI: "https://172.30.1.80:8080/callback",
