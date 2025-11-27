@@ -6,6 +6,8 @@ module.exports = {
   domain: "http://http://testsite.test.s3-website.ap-northeast-2.amazonaws.com",
   // domain : "localhost:8080"
 
+  // SSG
+  SSG_API_KEY: "3d098e75-70d1-4ab0-ab67-32483841f4ef",
   // 롯데온
   LOTTEON_API_KEY: "5d5b2cb498f3d20001665f4e9c861a0ad041498f8e00c76fab4cfb17",
   // CAFE24

@@ -12,6 +12,7 @@ const {
   CAFE24_CLIENT_ID,
   CAFE24_CLIENT_SECRET,
   LOTTEON_API_KEY,
+  SSG_API_KEY,
 } = require("../config/env");
 
 /**
@@ -140,16 +141,16 @@ router.get("/naver/settle", async (req, res) => {
       if (!acc[key]) {
         acc[key] = {
           productName: key,
-          salePrice: 0, // 판매가
-          saleNetPrice: 0, // 판매 공급가
-          saleVat: 0, // 판매 부가세
-          commissionAmount: 0, // 수수료
+          salesPrice: 0, // 판매가
+          salesNetPrice: 0, // 판매 공급가
+          salesVat: 0, // 판매 부가세
+          commision: 0, // 수수료
           settlementAmount: 0, // 정산금액
         };
       }
 
-      acc[key].salePrice += Number(item.paySettleAmount);
-      acc[key].commissionAmount +=
+      acc[key].salesPrice += Number(item.paySettleAmount);
+      acc[key].commision +=
         Number(-item.totalPayCommissionAmount) +
         Number(-item.sellingInterlockCommissionAmount);
       acc[key].settlementAmount += Number(item.settleExpectAmount);
@@ -158,8 +159,8 @@ router.get("/naver/settle", async (req, res) => {
     }, {});
 
     Object.values(grouped).forEach((group) => {
-      group.saleNetPrice = Math.floor(group.salePrice / 1.1); // 판매 공급가
-      group.saleVat = group.salePrice - group.saleNetPrice; // 판매 부가세
+      group.salesNetPrice = Math.floor(group.salesPrice / 1.1); // 판매 공급가
+      group.salesVat = group.salesPrice - group.salesNetPrice; // 판매 부가세
     });
 
     const resultList = Object.values(grouped);
@@ -378,59 +379,167 @@ async function retryRequest(fn, retries = 3, delay = 2000) {
   }
 }
 
-router.get("/lotteon/orders", async (req, res) => {
-  const { startDate, endDate } = req.query;
-
+/**
+ * 롯데온 - 매출액&수수료
+ */
+router.get("/lotteon/sales", async (req, res) => {
   try {
-    const requestFn = async () => {
-      return await axios.get(
-        "https://openapi.lotteon.com/v1/openapi/settle/v1/se/SettleProduct",
-        {
-          headers: {
-            Authorization: `Bearer ${LOTTEON_API_KEY}`,
-            Accept: "application/json",
-            "Accept-Language": "ko",
-            "X-Timezone": "GMT+09:00",
-            "Content-Type": "application/json",
-          },
-          params: {
-            startDate,
-            endDate,
-          },
-        }
-      );
-    };
+    let response = await axios.post(
+      "https://openapi.lotteon.com/v1/openapi/settle/v1/se/SettleItmdSales",
+      {
+        startDate: "20250901",
+        endDate: "20250930",
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${LOTTEON_API_KEY}`,
+          Accept: "application/json",
+          "Accept-Language": "ko",
+          "X-Timezone": "GMT+09:00",
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-    let response;
+    const resultData = response.data.data;
+    const list = Array.isArray(resultData) ? resultData : [resultData];
+    const grouped = list.reduce((acc, raw) => {
+      const item = {
+        slQty: Number(raw.slQty),
+        slAmt: Number(raw.slAmt),
+        slrDcAmt: Number(raw.slrDcAmt),
+        pdDcOcoAmt: Number(raw.pdDcOcoAmt),
+        pdDcSlrAmt: Number(raw.pdDcSlrAmt),
+        dvSeAmt: Number(raw.dvSeAmt),
+        dvDcOcoAmt: Number(raw.dvDcOcoAmt),
+        dvDcSlrAmt: Number(raw.dvDcSlrAmt),
+        bseCmsn: Number(raw.bseCmsn),
+        pcsCmsn: Number(raw.pcsCmsn),
+        dvCmsn: Number(raw.dvCmsn),
+        ajstDcAmt: Number(raw.ajstDcAmt),
+        pymtAmt: Number(raw.pymtAmt),
+        spdNm: raw.spdNm,
+      };
+      const key = item.spdNm;
 
-    try {
-      response = await retryRequest(requestFn);
-    } catch (err) {
-      // 롯데온의 9000 오류 처리 (정산 데이터 없음/DB 오류)
-      if (err.response?.data?.returnCode === "9000") {
-        console.log("⚠ 롯데온 서버 9000 오류 발생 → 정산 데이터 없음으로 처리");
-        return res.status(200).json({
-          status: 200,
-          success: true,
-          data: {
-            totalCount: 0,
-            list: [],
-          },
-        });
+      if (!acc[key]) {
+        acc[key] = {
+          productName: key,
+          salesPrice: 0, //판매가
+          salesNetPrice: 0, //판매공급가
+          salesVat: 0, //판매부가세
+          commision: 0, //수수료
+          commisionNetPrice: 0, //수수료공급가
+          commisionVat: 0, //수수료부가세
+          settlementAmount: 0, //정산금액
+          deduction: 0, //공제금액
+          deliveryFee: 0, //배송비
+        };
       }
 
-      throw err;
-    }
+      acc[key].salesPrice +=
+        item.slQty * item.slAmt -
+        (item.slrDcAmt + item.pdDcOcoAmt + item.pdDcSlrAmt) +
+        item.dvSeAmt -
+        (item.dvDcOcoAmt + item.dvDcSlrAmt); // 정산대상판매가 : 판매건수*판매단가 - (셀러즉시할인+상품할인(셀러부담)+상품할인(이커머스부담)) + 배송비정산대상 - (배송비할인(셀러부담)+배송비할인(이커머스부담))
+      acc[key].commision +=
+        -(item.bseCmsn + item.pcsCmsn + item.dvCmsn) + item.ajstDcAmt; //기본수수료+PCS수수료+배송비수수료-조정(할인)
+      acc[key].settlementAmount += item.pymtAmt; // 지급대상금액
+
+      return acc;
+    }, {});
+
+    Object.values(grouped).forEach((group) => {
+      group.salesNetPrice = Math.round(group.salesPrice / 1.1); // 판매 공급가
+      group.salesVat = group.salesPrice - group.salesNetPrice; // 판매 부가세
+      group.commisionNetPrice = Math.round(group.commision / 1.1); // 수수료 공급가
+      group.commisionVat = group.commision - group.commisionNetPrice; // 수수료 부가세
+    });
+
+    const resultList = Object.values(grouped);
 
     return res.status(200).json({
       status: 200,
       success: true,
-      data: response.data,
+      data: resultList,
     });
   } catch (err) {
-    console.error("최종 에러:", err.message);
+    console.error("error:", err.message);
     console.error("Error details:", err.response?.data);
+    return res.status(400).json({
+      status: 400,
+      success: false,
+      error: err.message,
+      details: err.response?.data || null,
+    });
+  }
+});
 
+/**
+ * SSG - 매출액&수수료
+ */
+router.get("/ssg/sales", async (req, res) => {
+  const { date } = req.query;
+
+  try {
+    let response = await axios.get(
+      `https://eapi.ssgadm.com/api/settle/v1/ven/sales/list.ssg`,
+      {
+        headers: {
+          Authorization: SSG_API_KEY,
+          "Content-Type": "application/json",
+        },
+        params: {
+          critnDt: "20250727",
+        },
+      }
+    );
+
+    const resultData = response.data.result.resultData;
+    const list = Array.isArray(resultData) ? resultData : [resultData];
+    const grouped = list.reduce((acc, item) => {
+      const key = item.itemNm;
+
+      if (!acc[key]) {
+        acc[key] = {
+          productName: key,
+          salesPrice: 0, //판매가
+          salesNetPrice: 0, //판매공급가
+          salesVat: 0, //판매부가세
+          commision: 0, //수수료
+          commisionNetPrice: 0, //수수료공급가
+          commisionVat: 0, //수수료부가세
+          settlementAmount: 0, //정산금액
+          deduction: 0, //공제금액
+          deliveryFee: 0, //배송비
+        };
+      }
+
+      acc[key].salesPrice += Number(item.netAmt); //netAmt : 순판매액
+      acc[key].commision += Number(-item.sellFee); // sellFee : 판매수수료
+      acc[key].settlementAmount += Number(item.settlAmt); // settlAmt : 정산금액
+      acc[key].deliveryFee += Number(item.dvShppcstAmt);
+
+      return acc;
+    }, {});
+
+    Object.values(grouped).forEach((group) => {
+      group.salesNetPrice = Math.round(group.salesPrice / 1.1); // 판매 공급가
+      group.salesVat = group.salesPrice - group.salesNetPrice; // 판매 부가세
+      group.commisionNetPrice = Math.round(group.commision / 1.1); // 수수료 공급가
+      group.commisionVat = group.commision - group.commisionNetPrice; // 수수료 부가세
+    });
+
+    const resultList = Object.values(grouped);
+
+    return res.status(200).json({
+      status: 200,
+      success: true,
+      data: resultList,
+    });
+  } catch (err) {
+    console.error("error:", err.message);
+    console.error("Error details:", err.response?.data);
     return res.status(400).json({
       status: 400,
       success: false,
