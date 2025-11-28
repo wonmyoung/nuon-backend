@@ -216,7 +216,7 @@ router.get("/naver/vat", async (req, res) => {
         Number(item.otherAmount) + Number(item.cashOutGoingEvidenceAmount);
     });
 
-    const result = [
+    let result = [
       {
         date: monthKey,
         paymentType: "credit",
@@ -239,6 +239,8 @@ router.get("/naver/vat", async (req, res) => {
         salesVat: etcTotal - Math.round(etcTotal / 1.1),
       },
     ];
+
+    result = result.filter((item) => item.salesPrice > 0);
 
     return res.status(200).json({
       status: 200,
@@ -653,8 +655,12 @@ router.get("/ssg/vat", async (req, res) => {
         },
       }
     );
-    const resultData = response.data.result.resultData;
-    if (!Array.isArray(resultData) || resultData.length === 0) {
+
+    console.log(JSON.stringify(response.data));
+    const raw = response.data.result.resultData;
+    const resultData = Array.isArray(raw) ? raw : [raw];
+
+    if (!resultData || resultData.length === 0) {
       return res.status(200).json({
         status: 200,
         success: true,
@@ -686,7 +692,7 @@ router.get("/ssg/vat", async (req, res) => {
       etcTypes.etc += Number(item.etcPaymtAmt);
     });
 
-    const result = [
+    let result = [
       {
         date: monthKey,
         paymentType: "credit",
@@ -710,6 +716,8 @@ router.get("/ssg/vat", async (req, res) => {
         etcTypes,
       },
     ];
+
+    result = result.filter((item) => item.salesPrice > 0);
 
     return res.status(200).json({
       status: 200,
