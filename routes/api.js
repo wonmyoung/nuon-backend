@@ -5,8 +5,8 @@ const bcrypt = require("bcrypt");
 const TokenModel = require("../models/TokenMoel");
 
 const {
-  NAVER_CLIENT_ID_HOMEKEEPING,
-  NAVER_CLIENT_SECRET_HOMEKEEPING,
+  NAVER_CLIENT_ID_AURFE,
+  NAVER_CLIENT_SECRET_AURFE,
   CAFE24_MALL_ID,
   CAFE24_REDIRECT_URI,
   CAFE24_CLIENT_ID,
@@ -23,18 +23,24 @@ router.get("/", (req, res) => {
   res.status(200).json({ data: "hello won!", status: 200, success: true });
 });
 
+const dateFormat = (yyyymmdd) => {
+  if (!yyyymmdd) return "";
+  const str = yyyymmdd.toString();
+  return `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`;
+};
+
 /**
  * 네이버 - 토큰 발급
  */
 async function getNaverToken() {
   try {
     const timestamp = Date.now().toString();
-    const password = `${NAVER_CLIENT_ID_HOMEKEEPING}_${timestamp}`;
-    const hashed = bcrypt.hashSync(password, NAVER_CLIENT_SECRET_HOMEKEEPING);
+    const password = `${NAVER_CLIENT_ID_AURFE}_${timestamp}`;
+    const hashed = bcrypt.hashSync(password, NAVER_CLIENT_SECRET_AURFE);
     const client_secret_sign = Buffer.from(hashed, "utf-8").toString("base64");
 
     const params = new URLSearchParams({
-      client_id: NAVER_CLIENT_ID_HOMEKEEPING,
+      client_id: NAVER_CLIENT_ID_AURFE,
       timestamp: timestamp,
       client_secret_sign: client_secret_sign,
       grant_type: "client_credentials",
@@ -60,107 +66,68 @@ async function getNaverToken() {
 }
 
 /**
- * 네이버 - 건별 부가세 내역
+ * 네이버 - 품목별내역 매출액
+ * 전월 말일까지 조회가능 (한달이내)
  */
-router.get("/naver/vat", async (req, res) => {
-  const { startDate, endDate, pageNumber, pageSize } = req.query;
-
-  try {
-    // 먼저 토큰 발급
-    const accessToken = await getNaverToken();
-
-    let response = await axios({
-      method: "get",
-      maxBodyLength: Infinity,
-      url: "https://api.commerce.naver.com/external/v1/pay-settle/vat/case",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-      params: {
-        startDate: startDate,
-        endDate: endDate,
-        pageNumber: pageNumber,
-        pageSize: pageSize,
-      },
-    });
-
-    return res.status(200).json({
-      status: 200,
-      success: true,
-      data: response.data,
-    });
-  } catch (err) {
-    console.error("error:", err.message);
-    console.error("Error details:", err.response?.data);
-    return res.status(400).json({
-      status: 400,
-      success: false,
-      error: err.message,
-      details: err.response?.data || null,
-    });
-  }
-});
-
-/**
- * 네이버 - 건별 정산 내역
- * 상품명기준으로 조회할 수 있는 API
- * 날짜 항목을 searchDate 하나만 받고 있어서, 매일 조회되어야함.
- */
-router.get("/naver/settle", async (req, res) => {
-  const { searchDate, pageNumber, pageSize } = req.query;
-
+router.get("/naver/sales", async (req, res) => {
   try {
     const accessToken = await getNaverToken();
 
-    let response = await axios({
-      method: "get",
-      maxBodyLength: Infinity,
-      url: "https://api.commerce.naver.com/external/v1/pay-settle/settle/case",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-      params: {
-        searchDate: searchDate,
-        periodType: "SETTLE_CASEBYCASE_SETTLE_SCHEDULE_DATE",
-        // periodType: 조회 기간 기준
-        // SETTLE_CASEBYCASE_SETTLE_SCHEDULE_DATE(정산 예정일)
-        // SETTLE_CASEBYCASE_SETTLE_BASIS_DATE(정산 기준일)
-        // SETTLE_CASEBYCASE_SETTLE_COMPLETE_DATE(정산 완료일)
-        // SETTLE_CASEBYCASE_PAY_DATE(결제일)
-        // SETTLE_CASEBYCASE_TAXRETURN_BASIS_DATE(세금 신고 기준일)
-        pageNumber: pageNumber,
-        pageSize: pageSize, // 최대 1000
-      },
-    });
+    let page = 1;
+    const pageSize = 1000;
 
-    const grouped = response.data.elements.reduce((acc, item) => {
-      const key = item.productName;
+    let totalPages = 1;
+    let grouped = {};
 
-      if (!acc[key]) {
-        acc[key] = {
-          productName: key,
-          salesPrice: 0, // 판매가
-          salesNetPrice: 0, // 판매 공급가
-          salesVat: 0, // 판매 부가세
-          commision: 0, // 수수료
-          settlementAmount: 0, // 정산금액
-        };
-      }
+    while (page <= totalPages) {
+      const response = await axios({
+        method: "get",
+        maxBodyLength: Infinity,
+        url: "https://api.commerce.naver.com/external/v1/pay-settle/vat/case",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        params: {
+          startDate: "2025-09-01",
+          endDate: "2025-09-30",
+          pageNumber: page,
+          pageSize: pageSize,
+        },
+      });
 
-      acc[key].salesPrice += Number(item.paySettleAmount);
-      acc[key].commision +=
-        Number(-item.totalPayCommissionAmount) +
-        Number(-item.sellingInterlockCommissionAmount);
-      acc[key].settlementAmount += Number(item.settleExpectAmount);
+      const elements = response.data.elements;
+      const pagination = response.data.pagination;
 
-      return acc;
-    }, {});
+      totalPages = pagination.totalPages;
+
+      const list = Array.isArray(elements) ? elements : [elements];
+
+      list.forEach((item) => {
+        const date = item.settleBasisDate;
+        const product = item.productName;
+        const key = `${date}__${product}`;
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            date,
+            type: "naver",
+            productName: product,
+            salesPrice: 0,
+            salesNetPrice: 0,
+            salesVat: 0,
+          };
+        }
+
+        grouped[key].salesPrice += Number(item.totalSalesAmount);
+      });
+
+      page++;
+    }
 
     Object.values(grouped).forEach((group) => {
-      group.salesNetPrice = Math.floor(group.salesPrice / 1.1); // 판매 공급가
-      group.salesVat = group.salesPrice - group.salesNetPrice; // 판매 부가세
+      group.salesNetPrice = Math.round(group.salesPrice / 1.1);
+      group.salesVat = group.salesPrice - group.salesNetPrice;
     });
 
     const resultList = Object.values(grouped);
@@ -173,14 +140,124 @@ router.get("/naver/settle", async (req, res) => {
   } catch (err) {
     console.error("error:", err.message);
     console.error("Error details:", err.response?.data);
+
     return res.status(400).json({
       status: 400,
       success: false,
       error: err.message,
-      details: err.response?.data || null,
+      details: err.response?.data ?? null,
     });
   }
 });
+
+/**
+ * 네이버 - VAT내역
+ * 전월 말일까지 조회가능 (한달이내)
+ * 카드 / 현금 / 기타
+ */
+router.get("/naver/vat", async (req, res) => {
+  try {
+    const accessToken = await getNaverToken();
+
+    let page = 1;
+    const pageSize = 1000;
+    let totalPages = 1;
+
+    let allElements = [];
+
+    while (page <= totalPages) {
+      const response = await axios({
+        method: "get",
+        maxBodyLength: Infinity,
+        url: "https://api.commerce.naver.com/external/v1/pay-settle/vat/daily",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+        params: {
+          startDate: "2025-09-01",
+          endDate: "2025-09-30",
+          pageNumber: page,
+          pageSize: pageSize,
+        },
+      });
+
+      const { elements, pagination } = response.data;
+
+      totalPages = pagination.totalPages;
+
+      if (elements && elements.length > 0) {
+        allElements.push(...elements);
+      }
+
+      page++;
+    }
+
+    if (allElements.length === 0) {
+      return res.status(200).json({
+        status: 200,
+        success: true,
+        data: [],
+      });
+    }
+
+    const monthKey = allElements[0].settleBasisDate.slice(0, 7);
+
+    let creditTotal = 0;
+    let cashTotal = 0;
+    let etcTotal = 0;
+
+    allElements.forEach((item) => {
+      creditTotal += Number(item.creditCardAmount);
+
+      cashTotal += Number(item.cashInComeDeductionAmount);
+
+      etcTotal +=
+        Number(item.otherAmount) + Number(item.cashOutGoingEvidenceAmount);
+    });
+
+    const result = [
+      {
+        date: monthKey,
+        paymentType: "credit",
+        salesPrice: creditTotal,
+        salesNetPrice: Math.round(creditTotal / 1.1),
+        salesVat: creditTotal - Math.round(creditTotal / 1.1),
+      },
+      {
+        date: monthKey,
+        paymentType: "cash",
+        salesPrice: cashTotal,
+        salesNetPrice: Math.round(cashTotal / 1.1),
+        salesVat: cashTotal - Math.round(cashTotal / 1.1),
+      },
+      {
+        date: monthKey,
+        paymentType: "etc",
+        salesPrice: etcTotal,
+        salesNetPrice: Math.round(etcTotal / 1.1),
+        salesVat: etcTotal - Math.round(etcTotal / 1.1),
+      },
+    ];
+
+    return res.status(200).json({
+      status: 200,
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    console.error("error:", err.message);
+    console.error("Error details:", err.response?.data);
+
+    return res.status(400).json({
+      status: 400,
+      success: false,
+      error: err.message,
+      details: err.response?.data ?? null,
+    });
+  }
+});
+
 /**
  * CAFE24 - 최초 1회 토큰 생성
  */
@@ -419,12 +496,19 @@ router.get("/lotteon/sales", async (req, res) => {
         ajstDcAmt: Number(raw.ajstDcAmt),
         pymtAmt: Number(raw.pymtAmt),
         spdNm: raw.spdNm,
+        seStdDt: raw.seStdDt,
       };
-      const key = item.spdNm;
+
+      const date = item.seStdDt; // 날짜
+      const product = item.spdNm; // 상품명
+
+      const key = `${date}__${product}`; // 날짜 + 상품명 조합
 
       if (!acc[key]) {
         acc[key] = {
-          productName: key,
+          date,
+          type: "lotteon",
+          productName: product,
           salesPrice: 0, //판매가
           salesNetPrice: 0, //판매공급가
           salesVat: 0, //판매부가세
@@ -433,7 +517,6 @@ router.get("/lotteon/sales", async (req, res) => {
           commisionVat: 0, //수수료부가세
           settlementAmount: 0, //정산금액
           deduction: 0, //공제금액
-          deliveryFee: 0, //배송비
         };
       }
 
@@ -479,8 +562,6 @@ router.get("/lotteon/sales", async (req, res) => {
  * SSG - 매출액&수수료
  */
 router.get("/ssg/sales", async (req, res) => {
-  const { date } = req.query;
-
   try {
     let response = await axios.get(
       `https://eapi.ssgadm.com/api/settle/v1/ven/sales/list.ssg`,
@@ -498,11 +579,16 @@ router.get("/ssg/sales", async (req, res) => {
     const resultData = response.data.result.resultData;
     const list = Array.isArray(resultData) ? resultData : [resultData];
     const grouped = list.reduce((acc, item) => {
-      const key = item.itemNm;
+      const date = item.critnDt; // 날짜
+      const product = item.itemNm; // 상품명
+
+      const key = `${date}__${product}`; // 날짜 + 상품명 조합
 
       if (!acc[key]) {
         acc[key] = {
-          productName: key,
+          date: dateFormat(date),
+          type: "ssg",
+          productName: product,
           salesPrice: 0, //판매가
           salesNetPrice: 0, //판매공급가
           salesVat: 0, //판매부가세
@@ -548,5 +634,97 @@ router.get("/ssg/sales", async (req, res) => {
     });
   }
 });
+/**
+ * SSG - 부가세
+ * buyTypeDivCd : 10직매입 / 20특정매입 / 30위수탁
+ */
+router.get("/ssg/vat", async (req, res) => {
+  try {
+    let response = await axios.get(
+      `https://eapi.ssgadm.com/api/settle/v1/ven/tax/list.ssg`,
+      {
+        headers: {
+          Authorization: SSG_API_KEY,
+          "Content-Type": "application/json",
+        },
+        params: {
+          critnYm: "202507",
+          buyTypeDivCd: "30",
+        },
+      }
+    );
+    const resultData = response.data.result.resultData;
+    if (!Array.isArray(resultData) || resultData.length === 0) {
+      return res.status(200).json({
+        status: 200,
+        success: true,
+        data: [],
+      });
+    }
 
+    const monthKey = resultData[0].critnDt.slice(0, 7);
+
+    let creditTotal = 0;
+    let cashTotal = 0;
+    let etcTotal = 0;
+    let etcTypes = {
+      mobile: 0,
+      etc: 0,
+      alln: 0,
+    };
+
+    resultData.forEach((item) => {
+      creditTotal += Number(item.crdPaymtAmt);
+      cashTotal += Number(item.cshPaymtAmt);
+      etcTotal +=
+        Number(item.mobilPaymtAmt) +
+        Number(item.allnPaymtAmt) +
+        Number(item.etcPaymtAmt);
+
+      etcTypes.mobile += Number(item.mobilPaymtAmt);
+      etcTypes.alln += Number(item.allnPaymtAmt);
+      etcTypes.etc += Number(item.etcPaymtAmt);
+    });
+
+    const result = [
+      {
+        date: monthKey,
+        paymentType: "credit",
+        salesPrice: creditTotal,
+        salesNetPrice: Math.round(creditTotal / 1.1),
+        salesVat: creditTotal - Math.round(creditTotal / 1.1),
+      },
+      {
+        date: monthKey,
+        paymentType: "cash",
+        salesPrice: cashTotal,
+        salesNetPrice: Math.round(cashTotal / 1.1),
+        salesVat: cashTotal - Math.round(cashTotal / 1.1),
+      },
+      {
+        date: monthKey,
+        paymentType: "etc",
+        salesPrice: etcTotal,
+        salesNetPrice: Math.round(etcTotal / 1.1),
+        salesVat: etcTotal - Math.round(etcTotal / 1.1),
+        etcTypes,
+      },
+    ];
+
+    return res.status(200).json({
+      status: 200,
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    console.error("error:", err.message);
+    console.error("Error details:", err.response?.data);
+    return res.status(400).json({
+      status: 400,
+      success: false,
+      error: err.message,
+      details: err.response?.data || null,
+    });
+  }
+});
 module.exports = router;
